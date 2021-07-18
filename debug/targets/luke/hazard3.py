@@ -9,7 +9,7 @@ class hazard3_hart(targets.Hart):
     ram_size = 128 * 1024 # amount present on iCEBreaker -- can be more on CXXRTL sim.
     bad_address = 0xf00ba700
     instruction_hardware_breakpoint_count = 0
-    reset_vectors = [0x00000000]
+    reset_vectors = [0xc0]
     link_script_path = "hazard3.lds"
     misa = 0x40001104 # 32IMC
 

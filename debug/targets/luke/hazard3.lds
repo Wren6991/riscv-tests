@@ -5,6 +5,13 @@ OUTPUT_ARCH( "riscv" )
 SECTIONS
 {
   . = 0x0;
+
+  .vectors_dummy : {
+    /* offset +0xc0 to leave room for base vector table + 32 external IRQs
+       (could make this 0; just for consistency with other hazard3 tests) */
+    . = 0xc0;
+  }
+
   .text : 
   {
     *(.text.entry)
