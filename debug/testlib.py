@@ -228,6 +228,37 @@ class MultiSpike:
             except OSError:
                 pass
 
+class GenericSimCmd:
+    logfile = tempfile.NamedTemporaryFile(prefix='simcmd', suffix='.log')
+    logname = logfile.name
+
+    def __init__(self, sim_cmd=None, debug=False, timeout=300):
+        if sim_cmd:
+            cmd = shlex.split(sim_cmd)
+        else:
+            raise ValueError("GenericSimCmd requires a command!")
+
+        logfile = open(self.logname, "w")
+        if print_log_names:
+            real_stdout.write("Temporary simulator log: %s\n" % self.logname)
+        logfile.write("+ %s\n" % " ".join(cmd))
+        logfile.flush()
+
+        self.lognames = [self.logname]
+
+        self.process = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                stdout=logfile, stderr=logfile)
+
+        time.sleep(1) # Better to wait for it to print a "waiting for connection" thing but eh
+
+    def __del__(self):
+        try:
+            self.process.kill()
+            self.process.wait()
+        except OSError:
+            pass
+
+
 class VcsSim:
     logfile = tempfile.NamedTemporaryFile(prefix='simv', suffix='.log')
     logname = logfile.name
