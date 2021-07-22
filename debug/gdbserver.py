@@ -976,9 +976,9 @@ class InterruptTest(GdbSingleHartTest):
         # mtimecmp.
         assertLess(self.gdb.p("local"), 1000)
         self.gdb.command("delete breakpoints")
-        for _ in range(10):
+        for _ in range(100):
             self.gdb.c(wait=False)
-            time.sleep(2)
+            time.sleep(3)
             self.gdb.interrupt()
             interrupt_count = self.gdb.p("interrupt_count")
             local = self.gdb.p("local")
@@ -1451,7 +1451,7 @@ class DownloadTest(GdbTest):
         # TODO: remove the next line so we get a bit more code to download. The
         # line above that allows for more data runs into some error I don't
         # have time to track down right now.
-        length = min(2**14, max(2**10, self.hart.ram_size - 2048))
+        length = min(2**9, max(2**10, self.hart.ram_size - 2048))
         self.download_c = tempfile.NamedTemporaryFile(prefix="download_",
                 suffix=".c", delete=False)
         self.download_c.write(b"#include <stdint.h>\n")

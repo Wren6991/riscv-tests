@@ -19,7 +19,6 @@ class hazard3(targets.Target):
     openocd_config_path = "hazard3-remote-bitbang.cfg"
     timeout_sec = 300
     support_memory_sampling = False # Needs SBA
-    supports_clint_mtime = False # who is Clint
 
     def create(self):
         return testlib.GenericSimCmd(sim_cmd=self.sim_cmd)
