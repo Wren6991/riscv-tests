@@ -996,6 +996,47 @@ class InterruptTest(GdbSingleHartTest):
         self.gdb.p("interrupt_count")
         self.gdb.p("local")
 
+class CrashLoopOpcode(GdbTest):
+    compile_args= ("programs/crash_loop_opcode.S",)
+
+    def setup(self):
+        self.gdb.load()
+
+    def test(self):
+        self.gdb.b("main")
+        output = self.gdb.c()
+        assertIn(" main", output)
+        # First three instructions install a handler. Should run normally.
+        self.gdb.stepi()
+        assertIn("<main+4>", self.gdb.command("p $pc"))
+        self.gdb.stepi()
+        assertIn("<main+8>", self.gdb.command("p $pc"))
+        self.gdb.stepi()
+        assertIn("<main+12>", self.gdb.command("p $pc"))
+        # From this point, the core should not successfully retire any instructions.    FIXME broken on hazard3 right now!
+        minstret_initial = self.gdb.p("$minstret")
+
+        # Fourth instruction is illegal, will except into the handler. Stepping
+        # the handler will repeatedly re-except into the same handler due to
+        # another illegal instruction.
+        #
+        # This checks that exception entry acts as a single-step break
+        # condition, and that a valid DPC is sampled when stepping through an
+        # exception.
+        for i in range(5):
+            self.gdb.command("set $mcause = 0")
+            self.gdb.stepi()
+            assertIn("<bad_trap_handler>", self.gdb.command("p $pc"))
+            assertEqual(2, self.gdb.p("$mcause"))
+            # assertEqual(minstret_initial, self.gdb.p("$minstret"))
+        # Halt request should behave the same.
+        for i in range(5):
+            self.gdb.c(wait = False)
+            time.sleep(1)
+            self.gdb.interrupt()
+            assertIn("<bad_trap_handler>", self.gdb.command("p $pc"))
+            # assertEqual(minstret_initial, self.gdb.p("$minstret"))
+
 class MulticoreRegTest(GdbTest):
     compile_args = ("programs/infinite_loop.S", "-DMULTICORE")
 
