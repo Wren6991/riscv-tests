@@ -894,7 +894,7 @@ class RepeatReadTest(DebugTest):
     def test(self):
         self.gdb.b("main:start")
         self.gdb.c()
-        mtime_addr = 0x02000000 + 0xbff8
+        mtime_addr = 0x80000100 # changed hardcoded value for hazard3
         count = 1024
         output = self.gdb.command("monitor riscv repeat_read %d 0x%x 4" %
                 (count, mtime_addr))
