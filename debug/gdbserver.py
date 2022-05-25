@@ -1581,6 +1581,9 @@ class PrivRw(PrivTest):
     def test(self):
         """Test reading/writing priv."""
         self.write_nop_program(4)
+        # Set PMP to wide-open, else stepi will trap and change privilege
+        self.gdb.p("$pmpcfg0 = 0x1f")
+        self.gdb.p("$pmpaddr0 = 0xffffffff")
         for privilege in range(4):
             self.gdb.p("$priv=%d" % privilege)
             self.gdb.stepi()
