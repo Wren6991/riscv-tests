@@ -171,13 +171,13 @@ _start:                                                                 \
         .align 2;                                                       \
 trap_vector:                                                            \
         /* test whether the test came from pass/fail */                 \
-        csrr t5, mcause;                                                \
-        li t6, CAUSE_USER_ECALL;                                        \
-        beq t5, t6, write_tohost;                                       \
-        li t6, CAUSE_SUPERVISOR_ECALL;                                  \
-        beq t5, t6, write_tohost;                                       \
-        li t6, CAUSE_MACHINE_ECALL;                                     \
-        beq t5, t6, write_tohost;                                       \
+        /* removed for hazard3:   csrr t5, mcause;                   */ \
+        /* removed for hazard3:   li t6, CAUSE_USER_ECALL;           */ \
+        /* removed for hazard3:   beq t5, t6, write_tohost;          */ \
+        /* removed for hazard3:   li t6, CAUSE_SUPERVISOR_ECALL;     */ \
+        /* removed for hazard3:   beq t5, t6, write_tohost;          */ \
+        /* removed for hazard3:   li t6, CAUSE_MACHINE_ECALL;        */ \
+        /* removed for hazard3:   beq t5, t6, write_tohost;          */ \
         /* if an mtvec_handler is defined, jump to it */                \
         la t5, mtvec_handler;                                           \
         beqz t5, 1f;                                                    \
