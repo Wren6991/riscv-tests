@@ -1,0 +1,9 @@
+A modified version of the `p` test environment, suitable for the memory map of
+the Hazard3 testbench, and using Hazard3 testbench IO to quit with a
+pass/fail return code.
+
+The ISA test Makefile has been modified to:
+
+- Use this environment instead of the p environment
+- Generate .bin files, as the Hazard3 testbench does not have a built-in ELF
+  loader.

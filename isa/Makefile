@@ -49,6 +49,9 @@ vpath %.S $(src_dir)
 %.dump: %
 	$(RISCV_OBJDUMP) $< > $@
 
+%.bin: %
+	$(RISCV_PREFIX)objcopy -O binary $< $@
+
 %.out: %
 	$(RISCV_SIM) --isa=rv64gc_zfh_zicboz_svnapot --misaligned $< 2> $@
 
@@ -58,7 +61,7 @@ vpath %.S $(src_dir)
 define compile_template
 
 $$($(1)_p_tests): $(1)-p-%: $(1)/%.S
-	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) -I$(src_dir)/../env/p -I$(src_dir)/macros/scalar -T$(src_dir)/../env/p/link.ld $$< -o $$@
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) -I$(src_dir)/../env_p_hazard3 -I$(src_dir)/macros/scalar -T$(src_dir)/../env_p_hazard3/link.ld $$< -o $$@
 $(1)_tests += $$($(1)_p_tests)
 
 $$($(1)_v_tests): $(1)-v-%: $(1)/%.S
@@ -69,7 +72,9 @@ endif
 
 $(1)_tests_dump = $$(addsuffix .dump, $$($(1)_tests))
 
-$(1): $$($(1)_tests_dump)
+$(1)_tests_bin = $$(addsuffix .bin, $$($(1)_tests))
+
+$(1): $$($(1)_tests_dump) $$($(1)_tests_bin)
 
 .PHONY: $(1)
 
@@ -111,7 +116,7 @@ tests32_out = $(addsuffix .out32, $(filter rv32%,$(tests)))
 
 run: $(tests_out) $(tests32_out)
 
-junk += $(tests) $(tests_dump) $(tests_hex) $(tests_out) $(tests32_out)
+junk += $(tests) $(addsuffix .bin,$(tests)) $(tests_dump) $(tests_hex) $(tests_out) $(tests32_out)
 
 #------------------------------------------------------------
 # Default

@@ -6,6 +6,7 @@
 *.out
 *.hex
 .*.swp
+*.vcd
 *.pyc
 /autom4te.cache
 /Makefile
