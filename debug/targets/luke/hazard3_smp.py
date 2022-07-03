@@ -13,12 +13,12 @@ class hazard3_hart(targets.Hart):
     link_script_path = "hazard3.lds"
     misa = 0x40901105 # 32IMACX + U (X because of nonstandard debug CSRs)
 
-
 class hazard3(targets.Target):
-    harts = [hazard3_hart()]
-    openocd_config_path = "hazard3-remote-bitbang.cfg"
+    harts = [hazard3_hart(), hazard3_hart()]
+    openocd_config_path = "hazard3-remote-bitbang-multicore.cfg"
     timeout_sec = 300
-    support_memory_sampling = True # We have SBA!
+    support_memory_sampling = False # Needs SBA
 
     def create(self):
         return testlib.GenericSimCmd(sim_cmd=self.sim_cmd)
+
