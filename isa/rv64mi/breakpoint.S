@@ -20,11 +20,22 @@ RVTEST_CODE_BEGIN
   la a0, 1f
   csrrw a0, mtvec, a0
   csrw tselect, zero
+  csrw mtvec, a0
   j 2f
 .p2align 2
 1:
   j pass
 2:
+  csrw mtvec, a0
+
+  # Set tcontrol.mte, otherwise breakpoints are disabled. This may trap,
+  # because tcontrol is an optional register.
+  la a0, 1f
+  csrrw a0, mtvec, a0
+  li a1, 0x8
+  csrs tcontrol, a1
+.p2align 2
+1:
   csrw mtvec, a0
 
   # Set tcontrol.mte, otherwise breakpoints are disabled. This may trap,
