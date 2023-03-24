@@ -8,10 +8,14 @@
 # define REGBYTES 4
 #endif
 
+#ifndef MTIME_ADDR
+#define MTIME_ADDR 0x80000100
+#endif
+
         .global main
 main:
         li      s0, 0
-        li      s1, 0x0200bff8
+        li      s1, MTIME_ADDR
 loop:
         addi    s0, s0, 1
         LREG    s2, 0(s1)
