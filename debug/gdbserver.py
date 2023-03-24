@@ -692,7 +692,11 @@ class HwbpManual(DebugTest):
         tdata1 = MCONTROL_DMODE(self.hart.xlen)
         tdata1 = set_field(tdata1, MCONTROL_ACTION, MCONTROL_ACTION_DEBUG_MODE)
         tdata1 = set_field(tdata1, MCONTROL_MATCH, MCONTROL_MATCH_EQUAL)
-        tdata1 |= MCONTROL_M | MCONTROL_S | MCONTROL_U | MCONTROL_EXECUTE
+        tdata1 |= MCONTROL_M | MCONTROL_EXECUTE
+        if self.hart.misa & (1 << (ord('U') - ord('A'))):
+            tdata1 |= MCONTROL_U
+        if self.hart.misa & (1 << (ord('S') - ord('A'))):
+            tdata1 |= MCONTROL_S
 
         tselect = 0
         while True:
@@ -701,8 +705,8 @@ class HwbpManual(DebugTest):
             if value != tselect:
                 raise TestNotApplicable
             self.gdb.p(f"$tdata1=0x{tdata1:x}")
-            value = self.gdb.p("$tselect")
-            if value == tdata1:
+            value = self.gdb.p("$tdata1")
+            if (value & ((1 << 28) - 1)) == tdata1:
                 break
             self.gdb.p("$tdata1=0")
             tselect += 1
