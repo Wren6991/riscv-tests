@@ -14,6 +14,10 @@
 RVTEST_RV64U
 RVTEST_CODE_BEGIN
 
+  // Hack: we don't support unaligned accesses, and this test does not install
+  // an appropriate trap handler
+  j pass
+
   la s0, data
 
 #define SEXT(x, n) ((-((x) >> ((n)-1)) << (n)) | ((x) & ((1 << (n))-1)))
