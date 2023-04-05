@@ -1,0 +1,8 @@
+A modified version of the `p` test environment, which uses the rvcpp TB IO
+(same as Hazard3 TB IO) to control exit and pass/fail of tests. The ISA test
+Makefile has been modified to:
+
+- Use this environment instead of the p environment
+- Generate .bin files, to avoid requiring the simulator to embed an ELF
+  loader (note rvcpp is meant to be drop-in compatible with simple
+  CXXRTL/verilator harnesses of real cores)

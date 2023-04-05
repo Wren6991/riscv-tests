@@ -163,8 +163,6 @@
         .weak mtvec_handler;                                            \
         .globl _start;                                                  \
                                                                         \
-.zero 0x40;                                                             \
-                                                                        \
 _start:                                                                 \
         /* reset vector */                                              \
         j reset_vector;                                                 \
@@ -238,7 +236,7 @@ reset_vector:                                                           \
 
 // Hazard3 testbench IO addresses:
 
-#define IO_BASE 0x80000000
+#define IO_BASE 0xe0000000
 #define IO_PRINT_CHAR (IO_BASE + 0x0)
 #define IO_PRINT_U32  (IO_BASE + 0x4)
 #define IO_EXIT       (IO_BASE + 0x8)

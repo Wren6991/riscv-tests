@@ -1,0 +1,13 @@
+A modified version of the `v` test environment, which uses the rvcpp TB IO
+(same as Hazard3 TB IO) to control exit and pass/fail of tests. The ISA test
+Makefile has been modified to:
+
+- Use this environment instead of the v environment
+- Generate .bin files, to avoid requiring the simulator to embed an ELF
+  loader (note rvcpp is meant to be drop-in compatible with simple
+  CXXRTL/verilator harnesses of real cores)
+- Map TB IO for use by S/U mode with virtual memory enabled
+
+This directory contains modified copies of riscv_test.h and vm.c to support
+this. The other files are symlinked to the upstream ones in ../env/v, because
+they did not require modification.

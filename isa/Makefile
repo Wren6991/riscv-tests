@@ -61,11 +61,11 @@ vpath %.S $(src_dir)
 define compile_template
 
 $$($(1)_p_tests): $(1)-p-%: $(1)/%.S
-	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) -I$(src_dir)/../env_p_hazard3 -I$(src_dir)/macros/scalar -T$(src_dir)/../env_p_hazard3/link.ld $$< -o $$@
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) -I$(src_dir)/../env_p_rvcpp -I$(src_dir)/macros/scalar -T$(src_dir)/../env_p_rvcpp/link.ld $$< -o $$@
 $(1)_tests += $$($(1)_p_tests)
 
 $$($(1)_v_tests): $(1)-v-%: $(1)/%.S
-	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) -DENTROPY=0x$$(shell echo \$$@ | md5sum | cut -c 1-7) -std=gnu99 -O2 -I$(src_dir)/../env/v -I$(src_dir)/macros/scalar -T$(src_dir)/../env/v/link.ld $(src_dir)/../env/v/entry.S $(src_dir)/../env/v/*.c $$< -o $$@
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) -DENTROPY=0x$$(shell echo \$$@ | md5sum | cut -c 1-7) -std=gnu99 -O2 -I$(src_dir)/../env_v_rvcpp -I$(src_dir)/macros/scalar -T$(src_dir)/../env_v_rvcpp/link.ld $(src_dir)/../env_v_rvcpp/entry.S $(src_dir)/../env_v_rvcpp/*.c $$< -o $$@
 ifneq ($(SKIP_V),1)
 $(1)_tests += $$($(1)_v_tests)
 endif
