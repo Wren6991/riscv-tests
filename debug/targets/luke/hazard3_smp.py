@@ -11,7 +11,7 @@ class hazard3_hart(targets.Hart):
     instruction_hardware_breakpoint_count = 4
     reset_vectors = [0x40]
     link_script_path = "hazard3.lds"
-    misa = 0x40901105 # 32IMACX + U (X because of nonstandard debug CSRs)
+    misa = 0x40901107 # 32IMABCX + U (X because of nonstandard debug CSRs)
 
 class hazard3(targets.Target):
     harts = [hazard3_hart(), hazard3_hart()]
