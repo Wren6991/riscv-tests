@@ -9,7 +9,9 @@ import tempfile
 import time
 import os
 import re
+import itertools
 
+from datetime import datetime
 import targets
 import testlib
 from testlib import assertEqual, assertNotEqual
@@ -18,7 +20,8 @@ from testlib import assertGreater, assertRegex, assertLess
 from testlib import GdbTest, GdbSingleHartTest, TestFailed
 from testlib import TestNotApplicable, CompileError
 from testlib import UnknownThread
-from testlib import CouldNotReadRegisters
+from testlib import CouldNotReadRegisters, CommandException
+from testlib import ThreadTerminated
 
 MSTATUS_UIE = 0x00000001
 MSTATUS_SIE = 0x00000002
@@ -226,14 +229,15 @@ class CustomRegisterTest(SimpleRegisterTest):
 
 class SimpleNoExistTest(GdbTest):
     def test(self):
+        nonexist_csr = self.hart.nonexist_csr
         try:
-            self.gdb.p("$csr2288")
-            assert False, "Reading csr2288 should have failed"
+            self.gdb.p(f"${nonexist_csr}")
+            assert False, f"Reading the ${nonexist_csr} should have failed"
         except testlib.CouldNotFetch:
             pass
         try:
-            self.gdb.p("$csr2288=5")
-            assert False, "Writing csr2288 should have failed"
+            self.gdb.p(f"${nonexist_csr}=5")
+            assert False, f"Writing the ${nonexist_csr} should have failed"
         except testlib.CouldNotFetch:
             pass
 
@@ -439,7 +443,7 @@ class InstantHaltTest(GdbTest):
     def test(self):
         """Assert that reset is really resetting what it should."""
         self.gdb.command("monitor reset halt")
-        self.gdb.command("flushregs")
+        self.gdb.command("maintenance flush register-cache")
         threads = self.gdb.threads()
         pcs = []
         for t in threads:
@@ -457,7 +461,7 @@ class InstantChangePc(GdbTest):
         """Change the PC right as we come out of reset."""
         # 0x13 is nop
         self.gdb.command("monitor reset halt")
-        self.gdb.command("flushregs")
+        self.gdb.command("maintenance flush register-cache")
         self.gdb.command(f"p *((int*) 0x{self.hart.ram:x})=0x13")
         self.gdb.command(f"p *((int*) 0x{self.hart.ram + 4:x})=0x13")
         self.gdb.command(f"p *((int*) 0x{self.hart.ram + 8:x})=0x13")
@@ -641,18 +645,18 @@ def MCONTROL_DMODE(xlen):
 def MCONTROL_MASKMAX(xlen):
     return 0x3<<((xlen)-11)
 
-MCONTROL_SELECT = (1<<19)
-MCONTROL_TIMING = (1<<18)
-MCONTROL_ACTION = (0x3f<<12)
-MCONTROL_CHAIN = (1<<11)
-MCONTROL_MATCH = (0xf<<7)
-MCONTROL_M = (1<<6)
-MCONTROL_H = (1<<5)
-MCONTROL_S = (1<<4)
-MCONTROL_U = (1<<3)
-MCONTROL_EXECUTE = (1<<2)
-MCONTROL_STORE = (1<<1)
-MCONTROL_LOAD = (1<<0)
+MCONTROL_SELECT = 1<<19
+MCONTROL_TIMING = 1<<18
+MCONTROL_ACTION = 0x3f<<12
+MCONTROL_CHAIN = 1<<11
+MCONTROL_MATCH = 0xf<<7
+MCONTROL_M = 1<<6
+MCONTROL_H = 1<<5
+MCONTROL_S = 1<<4
+MCONTROL_U = 1<<3
+MCONTROL_EXECUTE = 1<<2
+MCONTROL_STORE = 1<<1
+MCONTROL_LOAD = 1<<0
 
 MCONTROL_TYPE_NONE = 0
 MCONTROL_TYPE_MATCH = 2
@@ -812,6 +816,9 @@ class UserInterrupt(DebugTest):
         self.gdb.p("i=0")
         self.exit()
 
+class GdbServerError(Exception):
+    pass
+
 class MemorySampleTest(DebugTest):
     def early_applicable(self):
         return self.target.support_memory_sampling
@@ -837,6 +844,7 @@ class MemorySampleTest(DebugTest):
                     first_timestamp = timestamp
                 else:
                     end = (timestamp, total_samples)
+                    previous_value = None
             else:
                 assertRegex(line, r"^0x[0-f]+: 0x[0-f]+$")
                 address, value = line.split(': ')
@@ -853,7 +861,7 @@ class MemorySampleTest(DebugTest):
             samples_per_second = 1000 * end[1] / (end[0] - first_timestamp)
             print(f"{samples_per_second} samples/second")
         else:
-            raise Exception("No samples collected.")
+            raise GdbServerError("No samples collected.")
 
     @staticmethod
     def check_samples_equal(raw_samples, check_addr, check_value):
@@ -912,6 +920,9 @@ class RepeatReadTest(DebugTest):
     def early_applicable(self):
         return self.target.supports_clint_mtime
 
+    warning_re = re.compile(r"\[(?P<target_name>[^\]]+)\] Re-reading memory "
+            r"from addresses 0x(?P<addr>[\da-f]+) and 0x(?P=addr)\.")
+
     def test(self):
         self.gdb.b("main:start")
         self.gdb.c()
@@ -920,10 +931,15 @@ class RepeatReadTest(DebugTest):
         output = self.gdb.command(
             f"monitor riscv repeat_read {count} 0x{mtime_addr:x} 4")
         values = []
-        for line in output.splitlines():
-            # Ignore warnings
-            if line.startswith("Batch memory"):
-                continue
+        def is_valid_warning(line):
+            match = self.warning_re.match(line)
+            if match is None:
+                return False
+            assertEqual(int(match["addr"], 16), mtime_addr,
+                    "The repeat read is reading from the wrong address")
+            return True
+
+        for line in itertools.dropwhile(is_valid_warning, output.splitlines()):
             for v in line.split():
                 values.append(int(v, 16))
 
@@ -1033,15 +1049,17 @@ class InterruptTest(GdbSingleHartTest):
             local = self.gdb.p("local")
             if interrupt_count > 1000 and \
                     local > 1000:
+                self.disable_timer()
                 return
 
+        self.disable_timer()
         assertGreater(interrupt_count, 1000)
         assertGreater(local, 1000)
 
     def postMortem(self):
         GdbSingleHartTest.postMortem(self)
-        self.gdb.p("*((long long*) 0x200bff8)")
-        self.gdb.p("*((long long*) 0x2004000)")
+        self.gdb.p(f"*((long long*) 0x{self.target.clint_addr + 0xbff8:x})")
+        self.gdb.p(f"*((long long*) 0x{self.target.clint_addr + 0x4000:x})")
         self.gdb.p("interrupt_count")
         self.gdb.p("local")
 
@@ -1226,6 +1244,8 @@ class MulticoreRunAllHaltOne(GdbTest):
         time.sleep(1)
         self.gdb.p("buf", fmt="")
 
+        self.disable_timer(interrupt=True)
+
 class MulticoreRtosSwitchActiveHartTest(GdbTest):
     compile_args = ("programs/multicore.c", "-DMULTICORE")
 
@@ -1254,6 +1274,8 @@ class MulticoreRtosSwitchActiveHartTest(GdbTest):
             assertIn("hit Breakpoint", output)
             assertIn("set_trap_handler", output)
             assertNotIn("received signal SIGTRAP", output)
+
+        self.disable_timer()
 
 class SmpSimultaneousRunHalt(GdbTest):
     compile_args = ("programs/run_halt_timing.S", "-DMULTICORE")
@@ -1443,7 +1465,7 @@ class TriggerDmode(TriggerTest):
         i = 0
         for i in range(16):
             tdata1 = self.gdb.p(f"(({xlen_type} *)&data)[{2*i}]")
-            if tdata1 == 0:
+            if (tdata1 == 0) or (tdata1 >> (self.hart.xlen-4) == 15):
                 break
             tdata2 = self.gdb.p(f"(({xlen_type} *)&data)[{2*i+1}]")
 
@@ -1598,6 +1620,7 @@ class DownloadTest(GdbTest):
 #        assertIn("0xbead", output)
 
 class PrivTest(GdbSingleHartTest):
+    """Base class for a few tests that change privilege levels."""
     compile_args = ("programs/priv.S", )
     def setup(self):
         # pylint: disable=attribute-defined-outside-init
@@ -1624,8 +1647,8 @@ class PrivTest(GdbSingleHartTest):
             pass
 
 class PrivRw(PrivTest):
+    """Test reading/writing priv."""
     def test(self):
-        """Test reading/writing priv."""
         self.write_nop_program(4)
         for privilege in range(4):
             self.gdb.p(f"$priv={privilege}")
@@ -1636,9 +1659,9 @@ class PrivRw(PrivTest):
                 assertEqual(actual, privilege)
 
 class PrivChange(PrivTest):
+    """Test that the core's privilege level actually changes when the debugger
+    writes it."""
     def test(self):
-        """Test that the core's privilege level actually changes."""
-
         if 0 not in self.supported:
             raise TestNotApplicable
 
@@ -1706,6 +1729,10 @@ class TranslateTest(GdbSingleHartTest):
         assertEqual(0x55667788, self.gdb.p("physical[1]"))
         assertEqual(0xdeadbeef, self.gdb.p("virtual[0]"))
         assertEqual(0x55667788, self.gdb.p("virtual[1]"))
+
+        # disable mmu
+        self.gdb.p("$mstatus=$mstatus & ~0x20000")
+        self.gdb.p("$satp=0")
 
 SATP_MODE_OFF = 0
 SATP_MODE_SV32 = 1
@@ -1780,10 +1807,10 @@ class VectorTest(GdbSingleHartTest):
             value = self.gdb.p(regname)
             assertNotEqual(value, 0)
             self.gdb.p(f"{regname}=0")
-            self.gdb.command("flushregs")
+            self.gdb.command("maintenance flush register-cache")
             assertEqual(self.gdb.p(regname), 0)
             self.gdb.p(f"{regname}=0x{value:x}")
-            self.gdb.command("flushregs")
+            self.gdb.command("maintenance flush register-cache")
             assertEqual(self.gdb.p(regname), value)
 
         assertEqual(self.gdb.p("$a0"), 0)
@@ -1844,22 +1871,28 @@ class EbreakTest(GdbSingleHartTest):
         output = self.gdb.c()
         assertIn("_exit", output)
 
-class CeaseMultiTest(GdbTest):
-    """Test that we work correctly when a hart ceases to respond (e.g. because
+class UnavailableMultiTest(GdbTest):
+    """Test that we work correctly when a hart becomes unavailable (e.g. because
     it's powered down)."""
     compile_args = ("programs/counting_loop.c", "-DDEFINE_MALLOC",
             "-DDEFINE_FREE")
 
     def early_applicable(self):
-        return self.hart.support_cease and len(self.target.harts) > 1
+        return (self.hart.support_cease or
+                self.target.support_unavailable_control) \
+            and len(self.target.harts) > 1
 
     def setup(self):
         ProgramTest.setup(self)
-        self.parkOtherHarts("precease")
+        self.parkOtherHarts()
 
     def test(self):
         # Run all the way to the infinite loop in exit
-        self.gdb.c(wait=False)
+        self.gdb.c_all(wait=False)
+        # Other hart should have become unavailable.
+        if self.target.support_unavailable_control:
+            self.server.wait_until_running(self.target.harts)
+            self.server.set_available([self.hart])
         self.gdb.expect(r"\S+ became unavailable.")
         self.gdb.interrupt()
 
@@ -1871,7 +1904,7 @@ class CeaseMultiTest(GdbTest):
                     self.gdb.p("$misa")
                     assert False, \
                         "Shouldn't be able to access unavailable hart."
-                except UnknownThread:
+                except (UnknownThread, CommandException):
                     pass
 
         # Check that the main hart can still be debugged.
@@ -1886,6 +1919,7 @@ class CeaseMultiTest(GdbTest):
         self.gdb.p("$pc=_start")
 
         self.exit()
+
 class CeaseStepiTest(ProgramTest):
     """Test that we work correctly when the hart we're debugging ceases to
     respond."""
@@ -1909,11 +1943,12 @@ class CeaseStepiTest(ProgramTest):
         except CouldNotReadRegisters:
             pass
 
-class CeaseRunTest(ProgramTest):
+class UnavailableRunTest(ProgramTest):
     """Test that we work correctly when the hart we're debugging ceases to
     respond."""
     def early_applicable(self):
-        return self.hart.support_cease
+        return self.hart.support_cease or \
+            self.target.support_unavailable_control
 
     def test(self):
         self.gdb.b("main")
@@ -1921,16 +1956,116 @@ class CeaseRunTest(ProgramTest):
         assertIn("Breakpoint", output)
         assertIn("main", output)
 
-        self.gdb.p("$pc=precease")
+        if self.target.support_unavailable_control:
+            self.gdb.p("$pc=loop_forever")
+        else:
+            self.gdb.p("$pc=cease")
         self.gdb.c(wait=False)
+        if self.target.support_unavailable_control:
+            self.server.wait_until_running([self.hart])
+            self.server.set_available(
+                [h for h in self.target.harts if h != self.hart])
         self.gdb.expect(r"\S+ became unavailable.")
         self.gdb.interrupt()
+        # gdb might automatically switch to the available hart.
+        try:
+            self.gdb.select_hart(self.hart)
+        except ThreadTerminated:
+            # GDB sees that the thread is gone. Count this as success.
+            return
         try:
             self.gdb.p("$pc")
             assert False, ("Registers shouldn't be accessible when the hart is "
                            "unavailable.")
         except CouldNotReadRegisters:
             pass
+
+class UnavailableCycleTest(ProgramTest):
+    """Test that harts can be debugged after becoming temporarily
+    unavailable."""
+    def early_applicable(self):
+        return self.target.support_unavailable_control
+
+    def test(self):
+        self.gdb.b("main")
+        output = self.gdb.c()
+        assertIn("Breakpoint", output)
+        assertIn("main", output)
+
+        self.gdb.p("$pc=loop_forever")
+        self.gdb.c(wait=False)
+        self.server.wait_until_running([self.hart])
+        self.server.set_available(
+                [h for h in self.target.harts if h != self.hart])
+        self.gdb.expect(r"\S+ became unavailable.")
+
+        # Now send a DMI command through OpenOCD to make the hart available
+        # again.
+
+        self.server.set_available(self.target.harts)
+        self.gdb.expect(r"\S+ became available")
+        self.gdb.interrupt()
+        self.gdb.p("$pc")
+
+class UnavailableHaltedTest(ProgramTest):
+    """Test behavior when the current hart becomes unavailable while halted."""
+    def early_applicable(self):
+        return self.target.support_unavailable_control
+
+    def test_resume(self, c_expect=None):
+        # Confirm things don't completely fall apart on `c`
+        self.gdb.c(wait=False)
+        if c_expect:
+            self.gdb.expect(c_expect)
+        else:
+            time.sleep(1)
+
+        # Now send a DMI command through OpenOCD to make the hart available
+        # again.
+        self.server.set_available(self.target.harts)
+
+        # The hart will show up as halted. That's just how spike behaves when we
+        # make a hart unavailable while it's halted.
+
+        self.gdb.expect("became available")
+        self.gdb.p("$minstret")
+
+    def test(self):
+        self.gdb.b("main")
+        output = self.gdb.c()
+        assertIn("Breakpoint", output)
+        assertIn("main", output)
+
+        self.server.set_available(
+                [h for h in self.target.harts if h != self.hart])
+        self.gdb.command(f"# disabled hart {self.hart.id}")
+        # gdb won't show that the hart became unavailable, because it thinks
+        # nothing can changed on a halted Linux thread.
+        try:
+            # We can't try this with something reasonable like $pc, because gdb
+            # has cached it, and it assumes the target can't change while it's
+            # halted.
+            self.gdb.p("$minstret")
+            assert False, ("Registers shouldn't be accessible when the hart is "
+                           "unavailable.")
+        except testlib.CouldNotFetch:
+            pass
+
+        # There's a breakpoint set, so gdb will single step. You can't single
+        # step an unavailable target, so gdb should get a message to that
+        # effect.
+        self.test_resume(c_expect="unavailable")
+
+        # Delete breakpoints
+        self.gdb.command("delete")
+        self.server.set_available(
+                [h for h in self.target.harts if h != self.hart])
+
+        # Resume again. With breakpoints cleared, gdb will send vCont;c instead
+        # of step. There should be no error this time, since there is no
+        # observable difference between an unavailable thread and a running
+        # thread.
+        self.test_resume()
 
 class FreeRtosTest(GdbTest):
     def early_applicable(self):
@@ -1955,8 +2090,20 @@ class FreeRtosTest(GdbTest):
         # thread.
         self.gdb.threads()
 
-        bp = self.gdb.b("prvQueueReceiveTask")
+        # fake 'Current Execution' thread is created.
+        threads = self.gdb.threads()
+        assertEqual(len(threads), 1)
+        assertIn("Current Execution", threads[0])
 
+        bp = self.gdb.b("vTaskStartScheduler")
+        self.gdb.c()
+        self.gdb.command(f"delete {bp}")
+        # 'Current Execution' is still there before the scheduler has been
+        # started.  Now there are 3 threads: Current Execution, Rx, Tx.
+        threads = self.gdb.threads()
+        assertEqual(len(threads), 3)
+
+        bp = self.gdb.b("prvQueueReceiveTask")
         self.gdb.c()
         self.gdb.command(f"delete {bp}")
 
@@ -1964,10 +2111,10 @@ class FreeRtosTest(GdbTest):
         self.gdb.c()
         self.gdb.command(f"delete {bp}")
 
-        # Now we know for sure at least 2 threads have executed.
-
+        # no more fake 'Current Execution' thread.
+        # Now there are 4 threads: Rx, Tx, IDLE, Tmr Svc.
         threads = self.gdb.threads()
-        assertGreater(len(threads), 1)
+        assertEqual(len(threads), 4)
 
         values = {}
         for thread in threads:
@@ -2014,7 +2161,6 @@ class EtriggerTest(DebugTest):
         self.gdb.b("handle_trap")
 
     def test(self):
-        self.gdb.command(f"monitor targets {self.hart.id}")
         # Set trigger on Load access fault
         self.gdb.command("monitor riscv etrigger set m 0x20")
         # Set fox to a null pointer so we'll get a load access exception later.
@@ -2034,17 +2180,21 @@ class IcountTest(DebugTest):
         DebugTest.setup(self)
         self.gdb.b("main")
         self.gdb.c()
-        self.gdb.command(f"monitor targets {self.hart.id}")
 
     def test(self):
         # Execute 2 instructions.
         output = self.gdb.command("monitor riscv icount set m 2")
-        assertNotIn("Failed", output)
+        if self.target.icount_limit > 1:
+            assertNotIn("Failed", output)
+        else:
+            assertIn("Failed", output)
+            self.gdb.b("main_post_csrr")
         output = self.gdb.c()
-        assertIn("breakpoint", output)
+        assertIn("main_post_csrr", output)
         main_post_csrr = self.gdb.p("&main_post_csrr")
         assertEqual(self.gdb.p("$pc"), main_post_csrr)
 
+        self.gdb.command("delete")
         self.gdb.command("monitor riscv icount clear")
 
         # Execute 1 instruction.
@@ -2064,7 +2214,6 @@ class ItriggerTest(GdbSingleHartTest):
         self.gdb.load()
 
     def test(self):
-        self.gdb.command(f"monitor targets {self.hart.id}")
         output = self.gdb.command("monitor riscv itrigger set 0x80")
         assertIn("Doesn't make sense", output)
         output = self.gdb.command("monitor riscv itrigger set m 0")
@@ -2100,6 +2249,14 @@ def main():
     testlib.print_log_names = parsed.print_log_names
 
     module = sys.modules[__name__]
+
+    # initialize PRNG
+    selected_seed = parsed.seed
+    if parsed.seed is None:
+        selected_seed = int(datetime.now().timestamp())
+        print(f"PRNG seed for {target.name} is generated automatically")
+    print(f"PRNG seed for {target.name} is {selected_seed}")
+    random.seed(selected_seed)
 
     return testlib.run_all_tests(module, target, parsed)
 

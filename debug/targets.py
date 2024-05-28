@@ -33,6 +33,9 @@ class Hart:
     # no device mapped to that location.
     bad_address = None
 
+    # The non-existent register for access test
+    nonexist_csr = "csr2288"
+
     # Number of instruction triggers the hart supports.
     instruction_hardware_breakpoint_count = 0
 
@@ -93,8 +96,11 @@ class Target:
     # before starting the test.
     gdb_setup = []
 
-    # Supports mtime at 0x2004000
+    # Supports mtime default at clint_addr + 0x4000
     supports_clint_mtime = True
+
+    # CLINT register address, set to the default value of spike.
+    clint_addr = 0x02000000
 
     # Implements custom debug registers like spike does. It seems unlikely any
     # hardware will every do that.
@@ -128,6 +134,12 @@ class Target:
     # Relative path to a FreeRTOS binary compiled from the spike demo project
     # in https://github.com/FreeRTOS/FreeRTOS.
     freertos_binary = None
+
+    # Supports controlling hart availability through DMCUSTOM.
+    support_unavailable_control = False
+
+    # Instruction count limit
+    icount_limit = 4
 
     # Internal variables:
     directory = None
@@ -186,6 +198,7 @@ class Target:
             Target.temporary_files.append(self.temporary_binary)
 
         args = list(sources) + [
+                f"-DCLINT={self.clint_addr}",
                 "programs/entry.S", "programs/init.c",
                 f"-DNHARTS={len(self.harts)}",
                 "-I", "../env",
@@ -196,7 +209,7 @@ class Target:
                 "-o", binary_name]
 
         if hart.extensionSupported('e'):
-            args.append("-march=rv32e")
+            args.append("-march=rv32e_zicsr")
             args.append("-mabi=ilp32e")
             args.append("-DRV32E")
         else:
@@ -206,9 +219,7 @@ class Target:
                     march += letter
             if hart.extensionSupported("v") and self.compiler_supports_v:
                 march += "v"
-            # Hack for recent GCC
-            march += "_zicsr"
-            args.append(f"-march={march}")
+            args.append(f"-march={march}_zicsr")
             if hart.xlen == 32:
                 args.append("-mabi=ilp32")
             else:
@@ -258,6 +269,9 @@ def add_target_options(parser):
             "the same time. This may make it harder to debug a failure if it "
             "does occur.")
 
+class TargetsException(Exception):
+    pass
+
 def target(parsed):
     directory = os.path.dirname(parsed.target)
     filename = os.path.basename(parsed.target)
@@ -280,7 +294,7 @@ def target(parsed):
             if h.xlen == 0:
                 h.xlen = parsed.xlen
             elif h.xlen != parsed.xlen:
-                raise Exception("The target hart specified an XLEN of "
+                raise TargetsException("The target hart specified an XLEN of "
                         f"{h.xlen}, but the command line specified an XLEN of "
                         f"{parsed.xlen}. They must match.")
 

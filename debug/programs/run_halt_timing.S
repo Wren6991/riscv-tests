@@ -8,7 +8,11 @@
 # define REGBYTES 4
 #endif
 
+#ifdef CLINT
+#define MTIME_ADDR      CLINT + 0xbff8
+#endif
 #ifndef MTIME_ADDR
+// hardcoded value for hazard3
 #define MTIME_ADDR 0x80000100
 #endif
 
