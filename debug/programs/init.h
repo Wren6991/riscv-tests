@@ -2,10 +2,9 @@
 #define INIT_H
 
 #ifdef CLINT
-#define MTIME           (*(volatile long long *)(CLINT + 0xbff8))
-#define MTIMECMP        ((volatile long long *)(CLINT + 0x4000))
-#else
-// hardcoded values for hazard3
+// #define MTIME           (*(volatile long long *)(CLINT + 0xbff8))
+// #define MTIMECMP        ((volatile long long *)(CLINT + 0x4000))
+// different hardcoded values for hazard3 tb
 #define MTIME           (*(volatile long long *)(0x80000100))
 #define MTIMECMP        ((volatile long long *)(0x80000108))
 #endif
