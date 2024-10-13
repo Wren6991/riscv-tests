@@ -935,8 +935,11 @@ class RepeatReadTest(DebugTest):
     def early_applicable(self):
         return self.target.supports_clint_mtime
 
-    warning_re = re.compile(r"\[(?P<target_name>[^\]]+)\] Re-reading memory "
+    warning_re_reread = re.compile(r"\[(?P<target_name>[^\]]+)\] Re-reading memory "
             r"from addresses 0x(?P<addr>[\da-f]+) and 0x(?P=addr)\.")
+
+    warning_re_slow_dmi = re.compile(r"Batch memory read encountered DMI error 3\."
+        r" Falling back on slower reads\.")
 
     def test(self):
         self.gdb.b("main:start")
@@ -947,12 +950,17 @@ class RepeatReadTest(DebugTest):
             f"monitor riscv repeat_read {count} 0x{mtime_addr:x} 4")
         values = []
         def is_valid_warning(line):
-            match = self.warning_re.match(line)
-            if match is None:
-                return False
-            assertEqual(int(match["addr"], 16), mtime_addr,
-                    "The repeat read is reading from the wrong address")
-            return True
+            match = self.warning_re_reread.match(line)
+            if match is not None:
+                assertEqual(int(match["addr"], 16), mtime_addr,
+                        "The repeat read is reading from the wrong address")
+                return True
+            match = self.warning_re_slow_dmi.match(line)
+            if match is not None:
+                return True
+            return False
+
+        print(output.splitlines())
 
         for line in itertools.dropwhile(is_valid_warning, output.splitlines()):
             for v in line.split():
