@@ -3,7 +3,6 @@
 #-----------------------------------------------------------------------
 
 rv64mi_sc_tests = \
-	access \
 	breakpoint \
 	csr \
 	mcsr \
@@ -19,5 +18,7 @@ rv64mi_sc_tests = \
 	sw-misaligned \
 	sd-misaligned \
 	zicntr \
+	instret_overflow \
+	pmpaddr \
 
 rv64mi_p_tests = $(addprefix rv64mi-p-, $(rv64mi_sc_tests))

@@ -65,6 +65,7 @@ def compile(args): # pylint: disable=redefined-builtin
 class Spike:
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=too-many-locals
+    # pylint: disable=too-many-positional-arguments
     def __init__(self, target, halted=False, timeout=None, with_jtag_gdb=True,
             isa=None, progbufsize=None, dmi_rti=None, abstract_rti=None,
             support_hasel=True, support_abstract_csr=True,
@@ -331,6 +332,8 @@ class VcsSim:
 class Openocd:
     # pylint: disable=too-many-instance-attributes
     # pylint: disable-next=consider-using-with
+    # pylint: disable=too-many-positional-arguments
+    # pylint: disable=consider-using-with
     logfile = tempfile.NamedTemporaryFile(prefix='openocd', suffix='.log')
     logname = logfile.name
 
@@ -748,6 +751,7 @@ class Gdb:
             11, 149, 107, 163, 73, 47, 43, 173, 7, 109, 101, 103, 191, 2, 139,
             97, 193, 157, 3, 29, 79, 113, 5, 89, 19, 37, 71, 179, 59, 137, 53)
 
+    # pylint: disable=too-many-positional-arguments
     def __init__(self, target, ports, cmd=None, timeout=60, binaries=None,
                  logremote=False):
         assert ports
@@ -1512,6 +1516,22 @@ class GdbTest(BaseTest):
         self.gdb.select_hart(self.hart)
         self.gdb.command(f"monitor targets {self.hart.id}")
 
+    def set_pmp_deny(self, address, size=4 * 1024):
+        # Enable physical memory protection, no permission to access specific
+        # address range (default 4KB).
+        self.gdb.p("$mseccfg=0x4")  # RLB
+        self.gdb.p("$pmpcfg0=0x98") # L, NAPOT, !R, !W, !X
+        self.gdb.p("$pmpaddr0="
+                       f"0x{((address >> 2) | ((size - 1) >> 3)):x}")
+        # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
+        self.gdb.command("monitor riscv exec_progbuf 0x12000073")
+
+    def reset_pmp_deny(self):
+        self.gdb.p("$pmpcfg0=0")
+        self.gdb.p("$pmpaddr0=0")
+        # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
+        self.gdb.command("monitor riscv exec_progbuf 0x12000073")
+
     def disable_pmp(self):
         # Disable physical memory protection by allowing U mode access to all
         # memory.
@@ -1525,6 +1545,9 @@ class GdbTest(BaseTest):
                 # pmcfg0 readback matches write, so TOR is supported.
                 self.gdb.p("$pmpaddr0="
                            f"0x{(self.hart.ram + self.hart.ram_size) >> 2:x}")
+            if self.target.implements_page_virtual_memory:
+                # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
+                self.gdb.command("monitor riscv exec_progbuf 0x12000073")
         except CouldNotFetch:
             # PMP registers are optional
             pass
@@ -1535,6 +1558,9 @@ class GdbTest(BaseTest):
             if interrupt:
                 self.gdb.interrupt()
             self.gdb.p("$mie=$mie & ~0x80")
+            self.gdb.p("$mstatus=$mstatus & ~0x8")
+            self.gdb.p(f"*((long long*) 0x{self.target.clint_addr + 0x4000:x})\
+                    =0x" + "f" * (self.hart.xlen // 4))
 
     def exit(self, expected_result=10):
         self.gdb.command("delete")

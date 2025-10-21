@@ -13,6 +13,7 @@ include $(src_dir)/rv64um/Makefrag
 include $(src_dir)/rv64ua/Makefrag
 include $(src_dir)/rv64uf/Makefrag
 include $(src_dir)/rv64ud/Makefrag
+include $(src_dir)/rv64uziccid/Makefrag
 include $(src_dir)/rv64uzfh/Makefrag
 include $(src_dir)/rv64uzba/Makefrag
 include $(src_dir)/rv64uzbb/Makefrag
@@ -22,6 +23,7 @@ include $(src_dir)/rv64si/Makefrag
 include $(src_dir)/rv64ssvnapot/Makefrag
 include $(src_dir)/rv64mi/Makefrag
 include $(src_dir)/rv64mzicbo/Makefrag
+include $(src_dir)/hypervisor/Makefrag
 endif
 include $(src_dir)/rv32ui/Makefrag
 include $(src_dir)/rv32uc/Makefrag
@@ -61,10 +63,10 @@ vpath %.S $(src_dir)
 	$(RISCV_PREFIX)objcopy -O binary $< $@
 
 %.out: %
-	$(RISCV_SIM) --isa=rv64gc_zfh_zicboz_svnapot_zicntr_zba_zbb_zbc_zbs --misaligned $< 2> $@
+	$(RISCV_SIM) --isa=rv64gch_ziccid_zfh_zicboz_svnapot_zicntr_zba_zbb_zbc_zbs --misaligned $< 2> $@
 
 %.out32: %
-	$(RISCV_SIM) --isa=rv32gc_zfh_zicboz_svnapot_zicntr_zba_zbb_zbc_zbs --misaligned $< 2> $@
+	$(RISCV_SIM) --isa=rv32gc_ziccid_zfh_zicboz_svnapot_zicntr_zba_zbb_zbc_zbs --misaligned $< 2> $@
 
 define compile_template
 
@@ -114,6 +116,7 @@ $(eval $(call compile_template,rv64um,-march=rv64g -mabi=lp64))
 $(eval $(call compile_template,rv64ua,-march=rv64g -mabi=lp64))
 $(eval $(call compile_template,rv64uf,-march=rv64g -mabi=lp64))
 $(eval $(call compile_template,rv64ud,-march=rv64g -mabi=lp64))
+$(eval $(call compile_template,rv64uziccid,-march=rv64g -mabi=lp64))
 $(eval $(call compile_template,rv64uzfh,-march=rv64g_zfh -mabi=lp64))
 $(eval $(call compile_template,rv64uzba,-march=rv64g_zba -mabi=lp64))
 $(eval $(call compile_template,rv64uzbb,-march=rv64g_zbb -mabi=lp64))
@@ -123,6 +126,7 @@ $(eval $(call compile_template,rv64mzicbo,-march=rv64g_zicboz -mabi=lp64))
 $(eval $(call compile_template,rv64si,-march=rv64g -mabi=lp64))
 $(eval $(call compile_template,rv64ssvnapot,-march=rv64g -mabi=lp64))
 $(eval $(call compile_template,rv64mi,-march=rv64g -mabi=lp64))
+$(eval $(call compile_template,hypervisor,-march=rv64gh -mabi=lp64))
 endif
 
 tests_dump = $(addsuffix .dump, $(tests))

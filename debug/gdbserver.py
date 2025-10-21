@@ -67,12 +67,19 @@ def srec_parse(line):
         # header
         return 0, 0, 0
     elif typ == b'S1':
-        # data with 16-bit address, sometimes get this when accessing low memory
+        # data with 16-bit address
         address = int(line[4:8], 16)
         for i in range(4, count+1):
-            data += "%c" % int(line[2*i:2*i+2], 16)
+            data += f"{int(line[2 * i:2 * i + 2], 16):c}"
         # Ignore the checksum.
         return 1, address, data
+    elif typ == b'S2':
+        # data with 24-bit address
+        address = int(line[4:10], 16)
+        for i in range(5, count+1):
+            data += f"{int(line[2 * i:2 * i + 2], 16):c}"
+        # Ignore the checksum.
+        return 2, address, data
     elif typ == b'S3':
         # data with 32-bit address
         # Any higher bits were chopped off.
@@ -83,7 +90,7 @@ def srec_parse(line):
         return 3, address, data
     elif typ in (b'S7', b'S8', b'S9'):
         # ignore execution start field
-        return 7, 0, 0
+        return int(typ[-1]), 0, 0
     else:
         raise TestFailed(f"Unsupported SREC type {typ!r}.")
 
@@ -271,6 +278,9 @@ class MemTest64(SimpleMemoryTest):
 class MemTestReadInvalid(SimpleMemoryTest):
     def test(self):
         bad_address = self.hart.bad_address
+        if self.target.support_set_pmp_deny:
+            self.set_pmp_deny(bad_address)
+            self.gdb.command("monitor riscv set_mem_access progbuf abstract")
         good_address = self.hart.ram + 0x80
 
         self.write_nop_program(2)
@@ -286,6 +296,10 @@ class MemTestReadInvalid(SimpleMemoryTest):
         self.gdb.stepi()    # Don't let gdb cache register read
         assertEqual(self.gdb.p(f"*((int*)0x{good_address:x})"), 0xabcdef)
         assertEqual(self.gdb.p("$s0"), 0x12345678)
+        if self.target.support_set_pmp_deny:
+            self.reset_pmp_deny()
+            self.gdb.command("monitor riscv set_mem_access progbuf sysbus "
+                             "abstract")
 
 #class MemTestWriteInvalid(SimpleMemoryTest):
 #    def test(self):
@@ -396,7 +410,7 @@ class MemTestBlock(GdbTest):
             highest_seen = 0
             for line in b:
                 record_type, address, line_data = srec_parse(line)
-                if record_type == 1 or record_type == 3: # data with 16- or 32-bit address
+                if record_type in (1, 2, 3):
                     offset = address - (self.hart.ram & 0xffffffff)
                     written_data = data[offset:offset+len(line_data)]
                     highest_seen += len(line_data)
@@ -683,6 +697,47 @@ class HwbpManual(DebugTest):
         return self.target.support_manual_hwbp and \
             self.hart.instruction_hardware_breakpoint_count >= 1
 
+    # TODO: This can be removed once
+    # https://github.com/riscv-collab/riscv-openocd/pull/1111
+    # is merged.
+    def check_reserve_trigger_support(self):
+        not_supp_msg = "RESERVE_TRIGGER_NOT_SUPPORTED"
+        if not_supp_msg in self.gdb.command(
+                    "monitor if [catch {riscv reserve_trigger 0 on} e] {echo " +
+                    not_supp_msg + "}").splitlines():
+            raise TestNotApplicable
+
+    def set_manual_trigger(self, tdata1, tdata2):
+        for tselect in itertools.count(0):
+            self.gdb.p(f"$tselect={tselect}")
+            if self.gdb.p("$tselect") != tselect:
+                raise TestNotApplicable
+
+            self.gdb.command(
+                    f"monitor riscv reserve_trigger {tselect} on")
+
+            # Need to disable the trigger before writing tdata2
+            self.gdb.p("$tdata1=0")
+            # Need to write a valid value to tdata2 before writing tdata1
+            self.gdb.p(f"$tdata2=0x{tdata2:x}")
+            self.gdb.p(f"$tdata1=0x{tdata1:x}")
+
+            tdata2_rb = self.gdb.p("$tdata2")
+            tdata1_rb = self.gdb.p("$tdata1")
+            if tdata1_rb == tdata1 and tdata2_rb == tdata2:
+                return tselect
+
+            type_rb = tdata1_rb & MCONTROL_TYPE(self.hart.xlen)
+            type_none = set_field(0, MCONTROL_TYPE(self.hart.xlen),
+                                  MCONTROL_TYPE_NONE)
+            if type_rb == type_none:
+                raise TestNotApplicable
+
+            self.gdb.p("$tdata1=0")
+            self.gdb.command(
+                    f"monitor riscv reserve_trigger {tselect} off")
+        assert False
+
     def test(self):
         if not self.hart.honors_tdata1_hmode:
             # Run to main before setting the breakpoint, because startup code
@@ -691,6 +746,12 @@ class HwbpManual(DebugTest):
             self.gdb.c()
 
         self.gdb.command("delete")
+
+        # TODO: This can be removed once
+        # https://github.com/riscv-collab/riscv-openocd/pull/1111
+        # is merged.
+        self.check_reserve_trigger_support()
+
         #self.gdb.hbreak("rot13")
         tdata1 = MCONTROL_DMODE(self.hart.xlen)
         tdata1 = set_field(tdata1, MCONTROL_TYPE(self.hart.xlen),
@@ -703,24 +764,9 @@ class HwbpManual(DebugTest):
         if self.hart.misa & (1 << (ord('S') - ord('A'))):
             tdata1 |= MCONTROL_S
 
-        tselect = 0
-        while True:
-            self.gdb.p(f"$tselect={tselect}")
-            value = self.gdb.p("$tselect")
-            if value != tselect:
-                raise TestNotApplicable
-            # Need to disable the trigger before writing tdata2
-            self.gdb.p("$tdata1=0")
-            # Need to write a valid value to tdata2 before writing tdata1
-            self.gdb.p("$tdata2=&rot13")
-            self.gdb.p(f"$tdata1=0x{tdata1:x}")
-            value = self.gdb.p("$tdata1")
-            if (value & ((1 << 28) - 1)) == tdata1:
-                break
-            if value & MCONTROL_TYPE(self.hart.xlen) == MCONTROL_TYPE_NONE:
-                raise TestNotApplicable
-            self.gdb.p("$tdata1=0")
-            tselect += 1
+        tdata2 = self.gdb.p("&rot13")
+
+        tselect = self.set_manual_trigger(tdata1, tdata2)
 
         # The breakpoint should be hit exactly 2 times.
         for _ in range(2):
@@ -737,13 +783,21 @@ class HwbpManual(DebugTest):
         self.gdb.c()
         before = self.gdb.p("$pc")
         assertEqual(before, self.gdb.p("&crc32a"))
+
         self.gdb.stepi()
-        after = self.gdb.p("$pc")
-        assertNotEqual(before, after)
+        assertEqual(before, self.gdb.p("$pc"),
+                    "OpenOCD shouldn't disable a reserved trigger.")
 
         # Remove the manual HW breakpoint.
         assertEqual(tselect, self.gdb.p("$tselect"))
         self.gdb.p("$tdata1=0")
+
+        self.gdb.stepi()
+        assertNotEqual(before, self.gdb.p("$pc"),
+                       "OpenOCD should be able to step from a removed BP.")
+
+        self.gdb.command(
+                f"monitor riscv reserve_trigger {tselect} off")
 
         self.gdb.b("_exit")
         self.exit()
@@ -1075,9 +1129,9 @@ class InterruptTest(GdbSingleHartTest):
                 self.disable_timer()
                 return
 
-        self.disable_timer()
         assertGreater(interrupt_count, 1000)
         assertGreater(local, 1000)
+        self.disable_timer()
 
     def postMortem(self):
         GdbSingleHartTest.postMortem(self)
@@ -2189,6 +2243,9 @@ class EtriggerTest(DebugTest):
         # Set fox to a bad pointer so we'll get a load access exception later.
         # Use NULL if a known-bad address is not provided.
         bad_address = self.hart.bad_address or 0
+        if self.target.support_set_pmp_deny:
+            self.set_pmp_deny(bad_address)
+            self.gdb.command("monitor riscv set_mem_access progbuf abstract")
         self.gdb.p(f"fox=(char*)0x{bad_address:08x}")
         output = self.gdb.c()
         # We should not be at handle_trap
@@ -2197,6 +2254,10 @@ class EtriggerTest(DebugTest):
         # actual exception handler.
         assertIn("breakpoint", output)
         assertIn("trap_entry", self.gdb.where())
+        if self.target.support_set_pmp_deny:
+            self.reset_pmp_deny()
+            self.gdb.command("monitor riscv set_mem_access progbuf sysbus "
+                             "abstract")
 
 class IcountTest(DebugTest):
     compile_args = ("programs/infinite_loop.S", )

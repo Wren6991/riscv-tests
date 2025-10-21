@@ -32,6 +32,13 @@ test_ ## testnum: \
 #define TEST_INSERT_NOPS_9  nop; TEST_INSERT_NOPS_8
 #define TEST_INSERT_NOPS_10 nop; TEST_INSERT_NOPS_9
 
+#if __riscv_xlen == 64
+#define LOAD_PTR ld
+#define STORE_PTR sd
+#else
+#define LOAD_PTR lw
+#define STORE_PTR sw
+#endif
 
 #-----------------------------------------------------------------------
 # RV64UI MACROS
@@ -295,7 +302,36 @@ test_ ## testnum: \
     li  x5, 2; \
     bne x4, x5, 1b \
 
-#define TEST_BR2_OP_TAKEN( testnum, inst, val1, val2 ) \
+#define TEST_LD_ST_BYPASS(testnum, load_inst, store_inst, result, offset, base) \
+test_ ## testnum: \
+    li  TESTNUM, testnum; \
+    la  x2, base;        \
+    li x1, result; \
+    store_inst x1, offset(x2); \
+    load_inst x14, offset(x2);  \
+    store_inst x14, offset(x2); \
+    load_inst x2, offset(x2);  \
+    li  x7, result; \
+    bne x2, x7, fail;  \
+    la  x2, base;        \
+    STORE_PTR x2,8(x2); \
+    LOAD_PTR x4,8(x2); \
+    store_inst x1, offset(x4); \
+    bne x4, x2, fail;  \
+    load_inst x14, offset(x4);  \
+    bne x14, x7, fail;  \
+
+#define TEST_ST_LD_BYPASS(testnum, load_inst, store_inst, result, offset, base) \
+test_ ## testnum: \
+    li  TESTNUM, testnum;            \
+    la  x2, base;                    \
+    li  x1, result;                  \
+    store_inst x1, offset(x2);       \
+    load_inst x14, offset(x2);       \
+    li  x7, result;                  \
+    bne x14, x7, fail;               \
+
+#define TEST_BR2_OP_TAKEN(testnum, inst, val1, val2 ) \
 test_ ## testnum: \
     li  TESTNUM, testnum; \
     li  x1, val1; \
@@ -381,12 +417,23 @@ test_ ## testnum: \
 # Tests floating-point instructions
 #-----------------------------------------------------------------------
 
-#define qNaNh 0h:7e00
-#define sNaNh 0h:7c01
-#define qNaNf 0f:7fc00000
-#define sNaNf 0f:7f800001
-#define qNaN 0d:7ff8000000000000
-#define sNaN 0d:7ff0000000000001
+# 16-bit half precision (float16)
+#define qNaNh     0x7e00
+#define sNaNh     0x7c01
+#define Infh      0x7c00
+#define nInfh     0xfc00
+
+# 32-bit single precision (float)
+#define qNaNf     0x7fc00000
+#define sNaNf     0x7f800001
+#define Inff      0x7f800000
+#define nInff     0xff800000
+
+# 64-bit double precision (double)
+#define qNaNd     0x7ff8000000000000
+#define sNaNd     0x7ff0000000000001
+#define Infd      0x7ff0000000000000
+#define nInfd     0xfff0000000000000
 
 #define TEST_FP_OP_H_INTERNAL( testnum, flags, result, val1, val2, val3, code... ) \
 test_ ## testnum: \
@@ -404,9 +451,9 @@ test_ ## testnum: \
   .pushsection .data; \
   .align 1; \
   test_ ## testnum ## _data: \
-  .float16 val1; \
-  .float16 val2; \
-  .float16 val3; \
+  .val1; \
+  .val2; \
+  .val3; \
   .result; \
   .popsection
 
@@ -426,9 +473,9 @@ test_ ## testnum: \
   .pushsection .data; \
   .align 2; \
   test_ ## testnum ## _data: \
-  .float val1; \
-  .float val2; \
-  .float val3; \
+  .val1; \
+  .val2; \
+  .val3; \
   .result; \
   .popsection
 
@@ -448,9 +495,9 @@ test_ ## testnum: \
   .pushsection .data; \
   .align 3; \
   test_ ## testnum ## _data: \
-  .double val1; \
-  .double val2; \
-  .double val3; \
+  .val1; \
+  .val2; \
+  .val3; \
   .result; \
   .popsection
 
@@ -473,131 +520,163 @@ test_ ## testnum: \
   .pushsection .data; \
   .align 3; \
   test_ ## testnum ## _data: \
-  .double val1; \
-  .double val2; \
-  .double val3; \
+  .val1; \
+  .val2; \
+  .val3; \
   .result; \
   .popsection
 
 #define TEST_FCVT_S_D32( testnum, result, val1 ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, 0, double result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D32_INTERNAL( testnum, 0, double result, double val1, double 0, double 0, \
                     fcvt.s.d f13, f10; fcvt.d.s f13, f13; fsd f13, 0(a0); lw t2, 4(a0); lw a0, 0(a0))
 
 #define TEST_FCVT_S_D( testnum, result, val1 ) \
-  TEST_FP_OP_D_INTERNAL( testnum, 0, double result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D_INTERNAL( testnum, 0, double result, double val1, double 0, double 0, \
                     fcvt.s.d f13, f10; fcvt.d.s f13, f13; fmv.x.d a0, f13)
 
 #define TEST_FCVT_D_S( testnum, result, val1 ) \
-  TEST_FP_OP_S_INTERNAL( testnum, 0, float result, val1, 0.0, 0.0, \
+  TEST_FP_OP_S_INTERNAL( testnum, 0, float result, float val1, float 0, float 0, \
                     fcvt.d.s f13, f10; fcvt.s.d f13, f13; fmv.x.s a0, f13)
 
 #define TEST_FCVT_H_S( testnum, result, val1 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, 0, float16 result, val1, 0.0, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, 0, float16 result, float16 val1, float16 0, float16 0, \
                     fcvt.s.h f13, f10; fcvt.h.s f13, f13; fmv.x.h a0, f13)
 
 #define TEST_FCVT_H_D( testnum, result, val1 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, 0, float16 result, val1, 0.0, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, 0, float16 result, float16 val1, float16 0, float16 0, \
                     fcvt.d.h f13, f10; fcvt.h.d f13, f13; fmv.x.h a0, f13)
 
 
 #define TEST_FP_OP1_H( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, flags, float16 result, val1, 0.0, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, float16 result, float16 val1, float16 0, float16 0, \
                     inst f13, f10; fmv.x.h a0, f13;)
 
 #define TEST_FP_OP1_S( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_S_INTERNAL( testnum, flags, float result, val1, 0.0, 0.0, \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, float result, float val1, float 0, float 0, \
                     inst f13, f10; fmv.x.s a0, f13)
 
 #define TEST_FP_OP1_D32( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, flags, double result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, double result, double val1, double 0, double 0, \
                     inst f13, f10; fsd f13, 0(a0); lw t2, 4(a0); lw a0, 0(a0))
 // ^: store computation result in address from a0, load high-word into t2
 
 #define TEST_FP_OP1_D( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_D_INTERNAL( testnum, flags, double result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, double result, double val1, double 0, double 0, \
                     inst f13, f10; fmv.x.d a0, f13)
 
 #define TEST_FP_OP1_S_DWORD_RESULT( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_S_INTERNAL( testnum, flags, dword result, val1, 0.0, 0.0, \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, dword result, float val1, float 0, float 0, \
                     inst f13, f10; fmv.x.s a0, f13)
 
 #define TEST_FP_OP1_H_DWORD_RESULT( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, flags, word result, val1, 0.0, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, word result, float16 val1, float16 0, float16 0, \
                     inst f13, f10; fmv.x.h a0, f13)
 
 #define TEST_FP_OP1_D32_DWORD_RESULT( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, double val1, double 0, double 0, \
                     inst f13, f10; fsd f13, 0(a0); lw t2, 4(a0); lw a0, 0(a0))
 // ^: store computation result in address from a0, load high-word into t2
 
 #define TEST_FP_OP1_D_DWORD_RESULT( testnum, inst, flags, result, val1 ) \
-  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, double val1, double 0, double 0, \
                     inst f13, f10; fmv.x.d a0, f13)
 
 #define TEST_FP_OP2_S( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_S_INTERNAL( testnum, flags, float result, val1, val2, 0.0, \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, float result, float val1, float val2, float 0, \
+                    inst f13, f10, f11; fmv.x.s a0, f13)
+
+#define TEST_FP_OP2_S_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, word result, word val1, word val2, float 0, \
                     inst f13, f10, f11; fmv.x.s a0, f13)
 
 #define TEST_FP_OP2_H( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, flags, float16 result, val1, val2, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, float16 result, float16 val1, float16 val2, float16 0, \
+                    inst f13, f10, f11; fmv.x.h a0, f13)
+
+#define TEST_FP_OP2_H_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, half result, half val1, half val2, float16 0, \
                     inst f13, f10, f11; fmv.x.h a0, f13)
 
 #define TEST_FP_OP2_D32( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, flags, double result, val1, val2, 0.0, \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, double result, double val1, double val2, double 0, \
                     inst f13, f10, f11; fsd f13, 0(a0); lw t2, 4(a0); lw a0, 0(a0))
 // ^: store computation result in address from a0, load high-word into t2
 
+#define TEST_FP_OP2_D32_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, dword val1, dword val2, double 0, \
+                    inst f13, f10, f11; fsd f13, 0(a0); lw t2, 4(a0); lw a0, 0(a0))
+
 #define TEST_FP_OP2_D( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_D_INTERNAL( testnum, flags, double result, val1, val2, 0.0, \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, double result, double val1, double val2, double 0, \
+                    inst f13, f10, f11; fmv.x.d a0, f13)
+
+#define TEST_FP_OP2_D_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, dword val1, dword val2, double 0, \
                     inst f13, f10, f11; fmv.x.d a0, f13)
 
 #define TEST_FP_OP3_S( testnum, inst, flags, result, val1, val2, val3 ) \
-  TEST_FP_OP_S_INTERNAL( testnum, flags, float result, val1, val2, val3, \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, float result, float val1, float val2, float val3, \
                     inst f13, f10, f11, f12; fmv.x.s a0, f13)
 
 #define TEST_FP_OP3_H( testnum, inst, flags, result, val1, val2, val3 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, flags, float16 result, val1, val2, val3, \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, float16 result, float16 val1, float16 val2, float16 val3, \
                     inst f13, f10, f11, f12; fmv.x.h a0, f13)
 
 #define TEST_FP_OP3_D32( testnum, inst, flags, result, val1, val2, val3 ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, flags, double result, val1, val2, val3, \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, double result, double val1, double val2, double val3, \
                     inst f13, f10, f11, f12; fsd f13, 0(a0); lw t2, 4(a0); lw a0, 0(a0))
 // ^: store computation result in address from a0, load high-word into t2
 
 #define TEST_FP_OP3_D( testnum, inst, flags, result, val1, val2, val3 ) \
-  TEST_FP_OP_D_INTERNAL( testnum, flags, double result, val1, val2, val3, \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, double result, double val1, double val2, double val3, \
                     inst f13, f10, f11, f12; fmv.x.d a0, f13)
 
 #define TEST_FP_INT_OP_S( testnum, inst, flags, result, val1, rm ) \
-  TEST_FP_OP_S_INTERNAL( testnum, flags, word result, val1, 0.0, 0.0, \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, word result, float val1, float 0, float 0, \
                     inst a0, f10, rm)
 
 #define TEST_FP_INT_OP_H( testnum, inst, flags, result, val1, rm ) \
-  TEST_FP_OP_H_INTERNAL( testnum, flags, word result, val1, 0.0, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, word result, float16 val1, float16 0, float16 0, \
                     inst a0, f10, rm)
 
 #define TEST_FP_INT_OP_D32( testnum, inst, flags, result, val1, rm ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, val1, 0.0, 0.0, \
-                    inst a0, f10, f11; li t2, 0)
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, double val1, double 0, double 0, \
+                    inst a0, f10, rm; li t2, ((result) << 32 >> 63) * -1)
 
 #define TEST_FP_INT_OP_D( testnum, inst, flags, result, val1, rm ) \
-  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, val1, 0.0, 0.0, \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, double val1, double 0, double 0, \
                     inst a0, f10, rm)
 
 #define TEST_FP_CMP_OP_S( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_S_INTERNAL( testnum, flags, word result, val1, val2, 0.0, \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, word result, float val1, float val2, float 0, \
+                    inst a0, f10, f11)
+
+#define TEST_FP_CMP_OP_S_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_S_INTERNAL( testnum, flags, word result, word val1, word val2, float 0, \
                     inst a0, f10, f11)
 
 #define TEST_FP_CMP_OP_H( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_H_INTERNAL( testnum, flags, hword result, val1, val2, 0.0, \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, hword result, float16 val1, float16 val2, float16 0, \
+                    inst a0, f10, f11)
+
+#define TEST_FP_CMP_OP_H_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_H_INTERNAL( testnum, flags, hword result, half val1, half val2, float16 0, \
                     inst a0, f10, f11)
 
 #define TEST_FP_CMP_OP_D32( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, val1, val2, 0.0, \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, double val1, double val2, double 0, \
+                    inst a0, f10, f11; li t2, 0)
+
+#define TEST_FP_CMP_OP_D32_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_D32_INTERNAL( testnum, flags, dword result, dword val1, dword val2, double 0, \
                     inst a0, f10, f11; li t2, 0)
 
 #define TEST_FP_CMP_OP_D( testnum, inst, flags, result, val1, val2 ) \
-  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, val1, val2, 0.0, \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, double val1, double val2, double 0, \
+                    inst a0, f10, f11)
+
+#define TEST_FP_CMP_OP_D_HEX( testnum, inst, flags, result, val1, val2 ) \
+  TEST_FP_OP_D_INTERNAL( testnum, flags, dword result, dword val1, dword val2, double 0, \
                     inst a0, f10, f11)
 
 #define TEST_FCLASS_S(testnum, correct, input) \
