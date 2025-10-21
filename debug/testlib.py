@@ -1225,7 +1225,7 @@ def run_tests(parsed, target, todo):
                                 f"{type(target).__name__}-{name}.log")
         # pylint: disable-next=consider-using-with
         log_fd = open(log_name, 'w', encoding='utf-8')
-        print(f"[{name}] Starting > {log_name}")
+        print(f"[{name:<30}] Starting > {log_name}")
         instance = definition(target, hart)
         sys.stdout.flush()
         log_fd.write(f"Test: {name}\n")
@@ -1246,7 +1246,7 @@ def run_tests(parsed, target, todo):
             sys.stdout = real_stdout
             log_fd.write(f"Time elapsed: {time.time() - start:.2f}s\n")
             log_fd.flush()
-        print(f"[{name}] {result} in {time.time() - start:.2f}s")
+        print(f"[{name:<30}] {result} in {time.time() - start:.2f}s")
         if result not in good_results and parsed.print_failures:
             with open(log_name, encoding='utf-8') as handle:
                 sys.stdout.write(handle.read())
