@@ -5,7 +5,7 @@ import testlib
 
 class hazard3_hart(targets.Hart):
     xlen = 32
-    ram = 0x00000000
+    ram = 0x80000000
     ram_size = 128 * 1024 # amount present on iCEBreaker -- can be more on CXXRTL sim.
     bad_address = 0xf00ba700
     instruction_hardware_breakpoint_count = 4

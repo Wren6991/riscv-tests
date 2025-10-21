@@ -4,7 +4,7 @@ OUTPUT_ARCH( "riscv" )
 
 SECTIONS
 {
-  . = 0x0;
+  . = 0x80000000;
 
   .vectors_dummy : {
     /* offset +0xc0 to leave room for base vector table + 32 external IRQs
