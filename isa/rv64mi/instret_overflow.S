@@ -13,6 +13,9 @@
 RVTEST_RV64M
 RVTEST_CODE_BEGIN
 
+  # Clear mcountinhibit.ir to ensure the counter runs (reset value is unspecified)
+  csrci mcountinhibit, 0x4
+
   # The value written to instret will be the value read by the following
   # instruction (i.e. the increment is suppressed)
   TEST_CASE(2, a0, 0, csrwi minstret, 0; csrr a0, minstret);
