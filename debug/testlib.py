@@ -69,8 +69,8 @@ class Spike:
     def __init__(self, target, halted=False, timeout=None, with_jtag_gdb=True,
             isa=None, progbufsize=None, dmi_rti=None, abstract_rti=None,
             support_hasel=True, support_abstract_csr=True,
-            support_abstract_fpr=False,
-            support_haltgroups=True, vlen=128, elen=64, harts=None):
+            support_abstract_fpr=False, support_haltgroups=True,
+            support_abstractauto=True, vlen=128, elen=64, harts=None):
         """Launch spike. Return tuple of its process and the port it's running
         on."""
         self.process = None
@@ -82,6 +82,7 @@ class Spike:
         self.support_abstract_fpr = support_abstract_fpr
         self.support_hasel = support_hasel
         self.support_haltgroups = support_haltgroups
+        self.support_abstractauto = support_abstractauto
         self.vlen = vlen
         self.elen = elen
 
@@ -166,6 +167,8 @@ class Spike:
         if not self.support_haltgroups:
             cmd.append("--dm-no-halt-groups")
 
+        if not self.support_abstractauto:
+            cmd.append("--dm-no-abstractauto")
 
         assert len(set(t.ram for t in self.harts)) == 1, \
                 "All spike harts must have the same RAM layout"
@@ -278,7 +281,8 @@ class VcsSim:
     logname = logfile.name
     lognames = [logname]
 
-    def __init__(self, sim_cmd=None, debug=False, timeout=300):
+    def __init__(self, sim_cmd=None, debug=False, timeout=300,
+                 server_started=r"^Listening on port (\d+)$"):
         if sim_cmd:
             cmd = shlex.split(sim_cmd)
         else:
@@ -312,7 +316,7 @@ class VcsSim:
                 line = listenfile.readline()
                 if not line:
                     time.sleep(1)
-                match = re.match(r"^Listening on port (\d+)$", line)
+                match = re.match(server_started, line)
                 if match:
                     done = True
                     self.port = int(match.group(1))
@@ -352,11 +356,11 @@ class Openocd:
         # line, since they are executed in order.
         cmd += [
             # Tell OpenOCD to bind gdb to an unused, ephemeral port.
-            "--command", "gdb_port 0",
+            "--command", "gdb port 0",
             # We create a socket for OpenOCD command line (TCL-RPC)
-            "--command", "tcl_port 0",
+            "--command", "tcl port 0",
             # don't use telnet
-            "--command", "telnet_port disabled",
+            "--command", "telnet port disabled",
         ]
 
         if config:
@@ -1094,7 +1098,8 @@ class Gdb:
             m = re.match(
                     r"[\s\*]*(\d+)\s*"
                     r'(Remote target'
-                    r'|Thread (\d+)\s*(?:".*?")?\s*\(Name: ([^\)]+))'
+                    r'|Thread (?:(\d+)|<main>)'
+                    r'(?:\s*(?:".*?")?\s*\(Name: ([^)]+)\))?)'
                     r"\s*(.*)", line)
             if m:
                 threads.append(Thread(*m.groups()))
@@ -1167,12 +1172,7 @@ def run_all_tests(module, target, parsed):
             print(name)
         return 0
 
-    try:
-        os.makedirs(parsed.logs)
-    except OSError:
-        # There's a race where multiple instances of the test program might
-        # decide to create the logs directory at the same time.
-        pass
+    os.makedirs(parsed.logs, exist_ok=True)
 
     overall_start = time.time()
 
@@ -1516,6 +1516,11 @@ class GdbTest(BaseTest):
         self.gdb.select_hart(self.hart)
         self.gdb.command(f"monitor targets {self.hart.id}")
 
+    def exec_sfence_vma(self):
+        if self.target.implements_page_virtual_memory:
+            # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
+            self.gdb.command("monitor riscv exec_progbuf 0x12000073")
+
     def set_pmp_deny(self, address, size=4 * 1024):
         # Enable physical memory protection, no permission to access specific
         # address range (default 4KB).
@@ -1523,14 +1528,12 @@ class GdbTest(BaseTest):
         self.gdb.p("$pmpcfg0=0x98") # L, NAPOT, !R, !W, !X
         self.gdb.p("$pmpaddr0="
                        f"0x{((address >> 2) | ((size - 1) >> 3)):x}")
-        # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
-        self.gdb.command("monitor riscv exec_progbuf 0x12000073")
+        self.exec_sfence_vma()
 
     def reset_pmp_deny(self):
         self.gdb.p("$pmpcfg0=0")
         self.gdb.p("$pmpaddr0=0")
-        # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
-        self.gdb.command("monitor riscv exec_progbuf 0x12000073")
+        self.exec_sfence_vma()
 
     def disable_pmp(self):
         # Disable physical memory protection by allowing U mode access to all
@@ -1545,9 +1548,7 @@ class GdbTest(BaseTest):
                 # pmcfg0 readback matches write, so TOR is supported.
                 self.gdb.p("$pmpaddr0="
                            f"0x{(self.hart.ram + self.hart.ram_size) >> 2:x}")
-            if self.target.implements_page_virtual_memory:
-                # PMP changes require an sfence.vma, 0x12000073 is sfence.vma
-                self.gdb.command("monitor riscv exec_progbuf 0x12000073")
+            self.exec_sfence_vma()
         except CouldNotFetch:
             # PMP registers are optional
             pass

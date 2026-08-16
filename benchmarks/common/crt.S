@@ -116,7 +116,8 @@ _start:
   la gp, __global_pointer$
 .option pop
 
-  la  tp, _end + 63
+  la  tp, _end
+  addi tp, tp, 63
   and tp, tp, -64
 
   # get core id
@@ -215,11 +216,3 @@ trap_entry:
 
   addi sp, sp, 272
   mret
-
-.section ".tohost","aw",@progbits
-.align 6
-.globl tohost
-tohost: .dword 0
-.align 6
-.globl fromhost
-fromhost: .dword 0

@@ -23,7 +23,7 @@ class Hart:
     # this value set to False are not compliant with the spec (but still usable
     # as long as running code doesn't try to mess with triggers set by an
     # external debugger).
-    honors_tdata1_hmode = True
+    honors_tdata1_dmode = True
 
     # Address where a r/w/x block of RAM starts, together with its size.
     ram = None
@@ -56,13 +56,18 @@ class Hart:
     # Supports the cease instruction, which causes a hart to become unavailable.
     support_cease = False
 
-    def __init__(self, misa=None, system=None, link_script_path=None):
+    progbufsize = None
+
+    def __init__(self, misa=None, system=None, link_script_path=None,
+            progbufsize=None):
         if misa:
             self.misa = misa
         if system:
             self.system = system
         if link_script_path:
             self.link_script_path = link_script_path
+        if progbufsize:
+            self.progbufsize = progbufsize
 
     def extensionSupported(self, letter):
         # target.misa is set by testlib.ExamineTarget
@@ -153,6 +158,15 @@ class Target:
 
     # Supports an address/data match trigger of type 6
     support_mcontrol6 = True
+
+    # Supports Instruction count trigger
+    support_icount = True
+
+    # Supports interrupt trigger
+    support_itrigger = True
+
+    # Supports exception trigger
+    support_etrigger = True
 
     # Internal variables:
     directory = None
